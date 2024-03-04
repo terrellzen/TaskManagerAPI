@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Cors;
+using Microsoft.AspNetCore.Mvc;
 using System;
 using System.Data.SqlClient;
 using System.Text.Json;
@@ -6,33 +7,16 @@ using System.Threading.Tasks;
 using System.Xml.Linq;
 using System.Xml.Serialization;
 using TaskManagerApi.Models;
+using TaskManagerApi.Data; // Assuming TaskDbContext is defined in this namespace
+using TaskItem = TaskManagerApi.Models.TaskItem; // Assuming Task class is defined in this namespace
 
 namespace TaskManagerApi.Controllers
 {
+    [EnableCors("AllowSpecificOrigin")]
     [ApiController]
     [Route("api/[controller]")]
     public class TaskController : ControllerBase
     {
-        public static readonly IEnumerable<TaskModel> TaskList = new[]
-        {
-            new TaskModel()
-        };
-
-        
-        /*public TaskModel Get(TaskModel[] taskList,int taskId)
-        {
-            TaskModel taskItem = taskList.FirstOrDefault(i => i.TaskId == taskId);
-
-            return taskItem;
-        }*/
-
-        /* public bool ValidTask(TaskModel item)
-         {
-             if (item.TaskId == null)
-                 return false;
-             else
-                 return true;
-         }*/
         /*
                 #region XML Interation
                 public void XmlSave(List<TaskModel> taskItem)
@@ -80,44 +64,28 @@ namespace TaskManagerApi.Controllers
 
         #region SQL Database Interaction
 
-        private readonly string connectionString = "Data Source=localhost;Initial Catalog=TaskDatabase;Persist Security Info=True;User ID=sa;Password=Password@SQL;TrustServerCertificate=True";
-        
         [HttpPost("PostTask")]
-        public IActionResult AddRecord([FromBody] TaskModel taskItem)
+        public IActionResult AddRecord([FromBody] TaskItem taskItem, [FromServices] TaskDbContext dbContext)
         {
             try
             {
                 if (taskItem != null)
                 {
-
+                    // Set Created and Updated timestamps
                     taskItem.Created = DateTime.Now;
                     taskItem.Updated = DateTime.Now;
 
-                    //Takes Serialized JSON File and Pushes it Into the Database
-                    using (SqlConnection connection = new SqlConnection(connectionString))
-                    {
-                        string query = "INSERT INTO Tasks (TaskName, TaskDesc, Status, Created, Updated, ProjectId, ProjectDesc) "
-                            + "VALUES (@Name, @Desc, @Status, @Created, @Updated, @ProjectId, @ProjectDesc)";
-                        using (SqlCommand command = new SqlCommand(query, connection))
-                        {
-                            command.Parameters.AddWithValue("@Name", taskItem.Name);
-                            command.Parameters.AddWithValue("@Desc", taskItem.Description);
-                            command.Parameters.AddWithValue("@Status", taskItem.Status);
-                            command.Parameters.AddWithValue("@Created", taskItem.Created);
-                            command.Parameters.AddWithValue("@Updated", taskItem.Updated);
-                            command.Parameters.AddWithValue("@ProjectId", taskItem.ProjectId);
-                            command.Parameters.AddWithValue("@ProjectDesc", taskItem.ProjectName);
-                            connection.Open();
-                            command.ExecuteNonQuery();
-                            connection.Close();
-                        }
-                    }
+                    // Add the taskItem to the context
+                    dbContext.Tasks.Add(taskItem);
 
-                    return Ok(); 
+                    // Save changes to the database
+                    dbContext.SaveChanges();
+
+                    return Ok("Task Added");
                 }
                 else
                 {
-                    return BadRequest("No file uploaded.");
+                    return BadRequest("No task item provided.");
                 }
             }
             catch (Exception ex)
@@ -126,102 +94,93 @@ namespace TaskManagerApi.Controllers
             }
         }
 
-        
         [HttpDelete("DeleteTask")]
-        public IActionResult DeleteRecord([FromQuery] int taskID)
+        public IActionResult DeleteRecord([FromQuery] int taskId, [FromServices] TaskDbContext dbContext)
         {
             try
             {
-                using (SqlConnection connection = new SqlConnection(connectionString))
+                // Retrieve the task to delete from the database
+                var taskToDelete = dbContext.Tasks.Find(taskId);
+
+                if (taskToDelete == null)
                 {
-                    string query = "DELETE Tasks WHERE TaskId = @Id";
-                    using (SqlCommand command = new SqlCommand(query, connection))
-                    {
-                        command.Parameters.AddWithValue("@Id", taskID);
-                        connection.Open();
-                        command.ExecuteNonQuery();
-                        connection.Close();
-                    }
+                    return NotFound($"There is no Task with the ID: {taskId}"); // Return 404 Not Found if task is not found
                 }
 
-                return Ok();
+                // Remove the task from the context
+                dbContext.Tasks.Remove(taskToDelete);
+
+                // Save changes to the database
+                dbContext.SaveChanges();
+
+                return Ok("Task Removed");
             }
             catch (Exception ex)
             {
-                return StatusCode(500, $"Internal server error: {ex}");
+                return StatusCode(500, $"Internal server error: {ex.Message}");
             }
         }
 
         [HttpPut("UpdateTask")]
-        public IActionResult UpdateRecord([FromBody] TaskModel taskItem)
+        public IActionResult UpdateRecord([FromBody] TaskItem taskItem, [FromServices] TaskDbContext dbContext)
         {
             try
             {
                 if (taskItem == null)
-                    BadRequest("No updates to the Task Item were found.");
-
-                taskItem.Updated = DateTime.Now;
-
-                using (SqlConnection connection = new SqlConnection(connectionString))
                 {
-                    string query = "UPDATE Tasks SET TaskName = @Name, TaskDesc = @Desc, Status = @Status, Created = @Created, Updated = @Updated, ProjectId = @ProjectId, ProjectDesc = @ProjectDesc WHERE TaskId = @Id";
-                    using (SqlCommand command = new SqlCommand(query, connection))
-                    {
-                        command.Parameters.AddWithValue("@Id", taskItem.TaskId);
-                        command.Parameters.AddWithValue("@Name", taskItem.Name);
-                        command.Parameters.AddWithValue("@Desc", taskItem.Description);
-                        command.Parameters.AddWithValue("@Status", taskItem.Status);
-                        command.Parameters.AddWithValue("@Created", taskItem.Created);
-                        command.Parameters.AddWithValue("@Updated", taskItem.Updated);
-                        command.Parameters.AddWithValue("@ProjectId", taskItem.ProjectId);
-                        command.Parameters.AddWithValue("@ProjectDesc", taskItem.ProjectName);
-                        connection.Open();
-                        command.ExecuteNonQuery();
-                        connection.Close();
-                    }
+                    return BadRequest("No updates to the Task Item were found.");
                 }
 
-                return Ok();
+                // Retrieve the task to update from the database
+                var existingTask = dbContext.Tasks.Find(taskItem.TaskId);
+
+                if (existingTask == null)
+                {
+                    return NotFound(); // Return 404 Not Found if task is not found
+                }
+
+                // Update task properties
+                existingTask.TaskName = taskItem.TaskName;
+                existingTask.TaskDesc = taskItem.TaskDesc;
+                existingTask.Status = taskItem.Status;
+                existingTask.Updated = DateTime.Now; // Update Updated timestamp to current time
+                existingTask.ProjectId = taskItem.ProjectId;
+                existingTask.ProjectDesc = taskItem.ProjectDesc;
+
+                // Save changes to the database
+                dbContext.SaveChanges();
+
+                return Ok("Task Updated");
             }
             catch (Exception ex)
             {
-                return StatusCode(500, $"Internal server error: {ex}");
-            }            
+                return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
         }
 
+
         [HttpGet("GetTask")]
-        public TaskModel PullRecord([FromQuery] int taskID)
+        public ActionResult<TaskItem> PullRecord([FromQuery] int taskID, [FromServices] TaskDbContext dbContext)
         {
-            TaskModel matchingItem = new TaskModel();
-
-            using (SqlConnection myConnection = new SqlConnection(connectionString))
+            try
             {
-                string oString = "SELECT * FROM Tasks WHERE TaskId=@taskID";
-                SqlCommand oCmd = new SqlCommand(oString, myConnection);
-                oCmd.Parameters.AddWithValue("@taskID", taskID);
-                myConnection.Open();
-                using (SqlDataReader oReader = oCmd.ExecuteReader())
-                {
-                    while (oReader.Read())                        {
-                        matchingItem.TaskId = int.Parse(oReader["TaskId"].ToString());
-                        if (oReader["ProjectId"] != null)
-                            matchingItem.Name = oReader["TaskName"].ToString();
-                        if (oReader["ProjectId"] != null)
-                            matchingItem.Description = oReader["TaskDesc"].ToString();
-                        if (oReader["ProjectId"] != null)
-                            matchingItem.Status = int.Parse(oReader["Status"].ToString());
-                        matchingItem.Created = DateTime.Parse(oReader["Created"].ToString());
-                        matchingItem.Updated = DateTime.Parse(oReader["Updated"].ToString());
-                        if (oReader["ProjectId"] != null)
-                            matchingItem.ProjectId = int.Parse(oReader["ProjectId"].ToString());
-                        if (oReader["ProjectId"] != null)
-                            matchingItem.ProjectName = oReader["ProjectDesc"].ToString();
-                    }
+                // Retrieve the task using Entity Framework Core
+                var matchingItem = dbContext.Tasks
+                    .Where(t => t.TaskId == taskID)
+                    .FirstOrDefault();
 
-                    myConnection.Close();
+                if (matchingItem == null)
+                {
+                    return NotFound(); // Return 404 Not Found if task is not found
                 }
+
+                return matchingItem;
             }
-            return matchingItem;
+            catch (Exception ex)
+            {
+                // Log the exception or handle it as needed
+                return StatusCode(500, $"An error occurred while retrieving the task: {ex.Message}");
+            }
         }
 
         #endregion
