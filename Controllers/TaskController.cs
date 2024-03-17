@@ -158,28 +158,48 @@ namespace TaskManagerApi.Controllers
             }
         }
 
+        [HttpGet("GetTasks")]
+        public ActionResult<IEnumerable<TaskItem>> PullRecords([FromQuery] int projectID, [FromServices] TaskDbContext dbContext)
+        {
+            try
+            {
+                // Retrieve the tasks using Entity Framework Core
+                var matchingItems = dbContext.Tasks
+                    .Where(x => x.ProjectId == projectID) // Filter tasks based on the provided taskIDs
+                    .ToList();
+
+                if (matchingItems.Count == 0)
+                {
+                    return NotFound(); // Return 404 Not Found if no tasks are found
+                }
+
+                return matchingItems;
+            }
+            catch (Exception ex)
+            {
+                // Log the exception or handle it as needed
+                return StatusCode(500, $"An error occurred while retrieving tasks: {ex.Message}");
+            }
+        }
 
         [HttpGet("GetTask")]
         public ActionResult<TaskItem> PullRecord([FromQuery] int taskID, [FromServices] TaskDbContext dbContext)
         {
             try
             {
-                // Retrieve the task using Entity Framework Core
-                var matchingItem = dbContext.Tasks
-                    .Where(t => t.TaskId == taskID)
-                    .FirstOrDefault();
-
-                if (matchingItem == null)
+                var taskItem = dbContext.Tasks.FirstOrDefault(x => x.TaskId == taskID);
+                
+                if (taskItem == null)
                 {
-                    return NotFound(); // Return 404 Not Found if task is not found
+                    return NotFound(); // Return 404 Not Found if no tasks are found
                 }
-
-                return matchingItem;
+                
+                return taskItem;
             }
             catch (Exception ex)
             {
                 // Log the exception or handle it as needed
-                return StatusCode(500, $"An error occurred while retrieving the task: {ex.Message}");
+                return StatusCode(500, $"An error occurred while retrieving task: {ex.Message}");
             }
         }
 
